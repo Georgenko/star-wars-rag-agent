@@ -109,7 +109,6 @@ def retry_other(state: AgentState) -> AgentState:
 
 def generate(state: AgentState) -> AgentState:
     prompt = f"""Answer the question using ONLY the context below. Be concise (2-3 sentences).
-End your answer with a line: "Source: <where the info came from>".
 
 Context:
 {state['context']}
@@ -118,6 +117,7 @@ Question: {state['query']}
 
 Answer:"""
     response = llm.invoke(prompt).content.strip()
+    response += f"\n\nSource: {state['source']}"
     return {**state, "answer": response}
 
 
