@@ -27,6 +27,8 @@ class AgentState(TypedDict):
     context: Optional[str]
     source: Optional[str]
     answer: Optional[str]
+    tried_both: Optional[bool]
+    needs_retry: Optional[bool]
 
 
 # ---------- Nodes ----------
@@ -80,6 +82,30 @@ def run_both(state: AgentState) -> AgentState:
     context = f"VECTOR CONTEXT:\n{vec['context']}\n\nGRAPH CONTEXT:\n{graph['context']}"
     return {**state, "context": context, "source": "vector + graph"}
 
+def grade_context(state: AgentState) -> AgentState:
+    """Check if retrieved context actually answers the question."""
+    prompt = f"""Does this context contain enough info to answer the question?
+Context:
+{state['context']}
+
+Question: {state['query']}
+
+Reply with exactly one word: yes or no."""
+    verdict = llm.invoke(prompt).content.strip().lower()
+    ok = "yes" in verdict
+    print(f"  [grader: {'sufficient' if ok else 'insufficient'}]")
+    return {**state, "needs_retry": not ok}
+
+
+def retry_other(state: AgentState) -> AgentState:
+    """First attempt failed grading - try the other source."""
+    other = "graph" if state["route"] == "vector" else "vector"
+    print(f"  [retrying with: {other}]")
+    fn = run_graph if other == "graph" else run_vector
+    result = fn(state)
+    return {**result, "tried_both": True}
+
+
 
 def generate(state: AgentState) -> AgentState:
     prompt = f"""Answer the question using ONLY the context below. Be concise (2-3 sentences).
@@ -103,6 +129,8 @@ def build_agent():
     graph.add_node("run_vector", run_vector)
     graph.add_node("run_graph", run_graph)
     graph.add_node("run_both", run_both)
+    graph.add_node("grade_context", grade_context)
+    graph.add_node("retry_other", retry_other)
     graph.add_node("generate", generate)
 
     graph.set_entry_point("route")
@@ -113,9 +141,17 @@ def build_agent():
         {"vector": "run_vector", "graph": "run_graph", "both": "run_both"},
     )
 
-    graph.add_edge("run_vector", "generate")
-    graph.add_edge("run_graph", "generate")
+    graph.add_edge("run_vector", "grade_context")
+    graph.add_edge("run_graph", "grade_context")
     graph.add_edge("run_both", "generate")
+
+    graph.add_conditional_edges(
+        "grade_context",
+        lambda state: "retry" if (state.get("needs_retry") and not state.get("tried_both")) else "generate",
+        {"retry": "retry_other", "generate": "generate"},
+    )
+
+    graph.add_edge("retry_other", "generate")
     graph.add_edge("generate", END)
 
     return graph.compile()
