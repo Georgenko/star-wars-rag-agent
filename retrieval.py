@@ -8,6 +8,7 @@ Two retrieval tools:
 """
 
 import json
+import networkx as nx
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -39,8 +40,14 @@ def vector_search(query: str, top_k: int = 2):
     return results
 
 
-# ---------- Knowledge graph search ----------
-# Maps everyday query words to the relation labels used in the graph
+# ---------- Knowledge graph setup ----------
+# Build a real directed graph: nodes = characters/factions, edges = relations
+G = nx.DiGraph()
+for t in TRIPLES:
+    G.add_edge(t["subject"], t["object"], relation=t["relation"])
+
+_ALL_NODES = list(G.nodes())
+
 _RELATION_SYNONYMS = {
     "father": "child_of", "mother": "child_of", "parent": "child_of",
     "child": "child_of", "son": "child_of", "daughter": "child_of",
@@ -54,27 +61,71 @@ _RELATION_SYNONYMS = {
 }
 
 
-def graph_search(query: str, top_k: int = 5):
-    """Return triples where subject/object matches a query word, or the
-    query implies one of the known relations (via synonym mapping)."""
-    query_words = set()
-    for w in query.split():
-        w = w.lower().strip("?.,'\"")
-        w = w[:-2] if w.endswith("'s") else w  # strip possessive: "luke's" -> "luke"
-        query_words.add(w)
+def _clean_word(w: str) -> str:
+    w = w.lower().strip("?.,'\"")
+    return w[:-2] if w.endswith("'s") else w
 
+
+def _find_entities_in_query(query: str):
+    """Which known graph nodes (character/faction names) are mentioned?"""
+    query_words = {_clean_word(w) for w in query.split()}
+    found = []
+    for node in _ALL_NODES:
+        node_words = {w.lower() for w in node.split()}
+        if node_words & query_words:
+            found.append(node)
+    return found
+
+
+def graph_search(query: str, top_k: int = 5):
+    """Traverse the knowledge graph:
+    - find which entities are mentioned in the query
+    - if 2+ entities mentioned, look for a path connecting them (multi-hop)
+    - otherwise, return that entity's direct edges (1-hop neighbors),
+      optionally filtered by an implied relation (e.g. "father" -> child_of)
+    """
+    entities = _find_entities_in_query(query)
+    query_words = {_clean_word(w) for w in query.split()}
     implied_relations = {
-        rel for word, rel in _RELATION_SYNONYMS.items() if word in query_words
+        rel for word, rel in _RELATION_SYNONYMS.items()
+        if word in query_words or word + "s" in query_words # tolerate plurals as well
     }
 
     matches = []
-    for t in TRIPLES:
-        subj_words = set(t["subject"].lower().split())
-        obj_words = set(t["object"].lower().split())
-        name_match = bool(query_words & subj_words or query_words & obj_words)
-        relation_match = t["relation"] in implied_relations
-        if name_match or relation_match:
-            matches.append(t)
+
+    # Multi-hop: if two known entities are both mentioned, find a path between them
+    if len(entities) >= 2:
+        for i in range(len(entities)):
+            for j in range(len(entities)):
+                if i == j:
+                    continue
+                try:
+                    path = nx.shortest_path(G.to_undirected(), entities[i], entities[j])
+                    for a, b in zip(path, path[1:]):
+                        if G.has_edge(a, b):
+                            relation = G.get_edge_data(a, b)["relation"]
+                            matches.append({"subject": a, "relation": relation, "object": b})
+                        else:
+                            relation = G.get_edge_data(b, a)["relation"]
+                            matches.append({"subject": b, "relation": relation, "object": a})
+                except nx.NetworkXNoPath:
+                    continue
+
+    # 1-hop: direct edges (outgoing + incoming) for each mentioned entity
+    if not matches:
+        for entity in entities:
+            for _, obj, data in G.out_edges(entity, data=True):
+                if not implied_relations or data["relation"] in implied_relations:
+                    matches.append({"subject": entity, "relation": data["relation"], "object": obj})
+            for subj, _, data in G.in_edges(entity, data=True):
+                if not implied_relations or data["relation"] in implied_relations:
+                    matches.append({"subject": subj, "relation": data["relation"], "object": entity})
+
+    if not matches and implied_relations:
+        for u, v, data in G.edges(data=True):
+            if data["relation"] in implied_relations:
+                matches.append({"subject": u, "relation": data["relation"], "object": v})
+
     return matches[:top_k]
 
 
