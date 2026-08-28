@@ -4,7 +4,8 @@ Two retrieval tools:
                      Uses TF-IDF vectors for speed/simplicity in this demo.
                      Swap in sentence-transformers or OpenAI embeddings for
                      real semantic search in a production version.
-2. graph_search   -> keyword lookup over knowledge graph triples
+2. graph_search   -> traversal over a NetworkX relationship graph
+                     (direct edges + multi-hop paths between entities)
 """
 
 import json

@@ -9,9 +9,11 @@ Built as a hands-on exploration of agentic orchestration, retrieval pipelines, a
 Instead of relying on a single fixed retrieval method, the agent **decides at query time** which knowledge source is best suited to answer the question:
  
 - **Vector search (RAG)** - semantic/lexical similarity search over unstructured lore text, ideal for descriptive "what happened" or "explain" questions.
-- **Knowledge graph search** - structured subject-relation-object triples, ideal for precise relational questions ("who is X's father", "who trained X").
+- **Knowledge graph search** - traversal over a directed graph of entity relationships; handles direct lookups ("who is X's father") and multi-hop connections ("how is X related to Y").
 - **Both** - when a question needs relational facts *and* narrative context.
-A **grader node** then evaluates whether the retrieved context is actually sufficient to answer the question. If not, the agent **automatically retries with the alternate source** before generating a final, grounded answer with source attribution.
+
+                                
+If a single source (**vector** or **graph**) is chosen, a **grader node** then evaluates whether the retrieved context is actually sufficient to answer the question. If not, the agent **automatically retries with the alternate source** before generating a final, grounded answer with source attribution.
  
 ## Architecture
  
@@ -47,7 +49,7 @@ run_vector  run_graph  run_both
 - **[LangGraph](https://github.com/langchain-ai/langgraph)** - stateful, graph-based agent orchestration with conditional edges
 - **[Groq](https://groq.com/)** (via `langchain-groq`) - fast LLM inference for routing, grading, and generation
 - **scikit-learn (TF-IDF)** - lightweight vector similarity search, standing in for a full embedding model
-- **NetworkX-style triples** - simple subject-relation-object knowledge graph
+- **[NetworkX](https://networkx.org/)** - real directed graph with multi-hop path traversal between entities
 
 ## Running it
  
