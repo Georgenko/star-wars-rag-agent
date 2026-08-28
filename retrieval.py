@@ -57,7 +57,11 @@ _RELATION_SYNONYMS = {
 def graph_search(query: str, top_k: int = 5):
     """Return triples where subject/object matches a query word, or the
     query implies one of the known relations (via synonym mapping)."""
-    query_words = set(w.lower().strip("?.,'\"") for w in query.split())
+    query_words = set()
+    for w in query.split():
+        w = w.lower().strip("?.,'\"")
+        w = w[:-2] if w.endswith("'s") else w  # strip possessive: "luke's" -> "luke"
+        query_words.add(w)
 
     implied_relations = {
         rel for word, rel in _RELATION_SYNONYMS.items() if word in query_words
